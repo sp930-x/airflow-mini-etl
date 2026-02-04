@@ -1,0 +1,11 @@
+.git
+.env
+
+__pycache__/
+*.pyc
+
+data/raw_weather.json
+data/processed_weather.csv
+
+logs/
+postgres-db-volume/

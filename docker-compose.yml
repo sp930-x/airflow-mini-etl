@@ -1,0 +1,63 @@
+﻿services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+
+  airflow-webserver:
+    image: apache/airflow:2.9.3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/project/dags
+      AIRFLOW_UID: "50000"
+      PYTHONPATH: /opt/airflow/project
+    volumes:
+      - ./:/opt/airflow/project
+    working_dir: /opt/airflow/project
+    ports:
+      - "8080:8080"
+    command: >
+      bash -lc "
+      pip install --no-cache-dir psycopg2-binary &&
+      airflow db init &&
+      airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true &&
+      airflow webserver
+      "
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/project/dags
+      AIRFLOW_UID: "50000"
+      PYTHONPATH: /opt/airflow/project
+    volumes:
+      - ./:/opt/airflow/project
+    working_dir: /opt/airflow/project
+    command: >
+      bash -lc "
+      pip install --no-cache-dir psycopg2-binary &&
+      airflow scheduler
+      "
+
+volumes:
+  postgres-db-volume:
