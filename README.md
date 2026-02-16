@@ -1,12 +1,22 @@
-# Airflow Mini ETL Project (Weather Data)
+# Airflow Mini ETL Project (Weather + Energy Pipeline)
 
 ## Overview
 
-This project is a minimal end-to-end ETL pipeline built with **Apache Airflow**, designed to demonstrate core data orchestration concepts using a simple workflow.
+Energy demand is strongly influenced by external factors such as temperature, seasonality, and regional patterns. 
+Understanding these relationships requires structured, reliable, and reproducible data pipelines that can transform raw time-series data into analytics-ready datasets.
 
-The pipeline extracts hourly weather data from a public API, transforms it into a structured CSV format, validates the output, and orchestrates the entire process using Airflow running in Docker.
+This project implements an end-to-end data engineering workflow using **Apache Airflow** and **PostgreSQL**.
 
-In addition to file-based outputs, the processed data can also be loaded into a PostgreSQL database running in Docker, introducing a basic warehouse-style data layer.
+The pipeline:
+
+- Extracts hourly weather data from a public API
+- Generates synthetic hourly energy load data
+- Loads both datasets into a PostgreSQL `raw` layer
+- Standardizes and cleans data in a `staging` layer
+- Builds a dimensional `mart` layer aggregated at **day × region** grain
+
+The objective is not only to move data, but to design an orchestrated, idempotent, and warehouse-style pipeline that supports analytical queries such as peak demand analysis and temperature-driven load changes.
+
 
 ---
 
@@ -15,75 +25,117 @@ In addition to file-based outputs, the processed data can also be loaded into a 
 ```
 External Weather API
         ↓
-     Extract
+     Extract (Airflow)
         ↓
-    Transform
+Generate Energy (Synthetic)
         ↓
-     Validate
+PostgreSQL (raw schema)
         ↓
-   CSV (Landing Layer)
+PostgreSQL (staging schema)
         ↓
-PostgreSQL (Raw Schema)
+PostgreSQL (mart schema)
+        ↓
+Analytics-ready Fact Table
 ```
-
-- **Orchestration**: Apache Airflow  
-- **Execution Environment**: Docker + Docker Compose  
-- **Landing Layer**: Local filesystem (JSON + CSV)  
-- **Warehouse Layer**: PostgreSQL (Docker container)  
-- **Executor**: LocalExecutor  
-- **Metadata DB**: PostgreSQL (Airflow internal)  
 
 ---
 
-## Pipeline Description
+## Data Layers
 
-The DAG `api_weather_etl` consists of three tasks:
+### Raw Layer (`raw`)
+Stores source-level data without structural modifications.
 
-### 1. Extract
-- Fetches hourly temperature data from the Open-Meteo API  
-- Stores raw JSON data locally  
+- `raw.weather_hourly`
+- `raw.energy_load_hourly`
 
-### 2. Transform
-- Converts raw JSON into a structured CSV format  
-- Extracts timestamp and temperature values  
-
-### 3. Validate
-- Validates the processed CSV (row count and schema)  
-- Ensures data quality before downstream usage  
+Purpose:
+- Preserve original granularity
+- Enable reprocessing if needed
 
 ---
 
-## PostgreSQL Layer
+### Staging Layer (`staging`)
+Standardizes data types and grain.
 
-The processed CSV can be loaded into a PostgreSQL database running in Docker.
+- `staging.weather_hourly_clean`
+- `staging.energy_hourly_clean`
 
-A separate schema is used to model data layers:
+Characteristics:
+- Explicit primary keys
+- `day` column normalized as `date`
+- Idempotent upsert logic
+- Ready for dimensional modeling
 
-- `raw` → original ingested data  
-- `staging` (planned) → cleaned & typed data  
-- `mart` (planned) → aggregated / analytics-ready data  
+---
 
-Example structure:
+### Mart Layer (`mart`)
+Dimensional warehouse layer for analytics.
 
-```
-Database: airflow
- ├── public
- └── raw
-      └── weather_hourly_raw
-```
+#### Dimensions
+- `mart.dim_date`
+- `mart.dim_region`
 
-This introduces a warehouse-style architecture and prepares the project for automated database loading in future iterations.
+#### Fact
+- `mart.fact_energy_load_daily`
+
+**Grain:**  
+`day × region`
+
+Aggregations:
+- `avg_load_mw`
+- `min_load_mw`
+- `max_load_mw`
+- `n_hours`
+
+This enables analytical queries such as:
+- Daily peak demand
+- Cold-shock impact analysis
+- Weekend vs weekday comparison
+
+---
+
+## Execution Plan & Index Strategy
+
+Time-series queries were validated using `EXPLAIN ANALYZE`.
+
+Observations:
+
+- Range predicates on `ts` can leverage btree indexes.
+- The primary key `(ts, region)` supports timestamp filtering.
+- For small tables, PostgreSQL may choose sequential scans based on cost estimation.
+
+Key takeaway:
+
+> Index presence does not guarantee usage; PostgreSQL selects execution plans based on estimated cost.
+
+---
+
+## Orchestration (Airflow)
+
+Airflow coordinates:
+
+1. Weather extraction
+2. Energy data generation
+3. Raw loading
+4. Staging upserts
+5. Mart aggregation
+
+All SQL transformation scripts are:
+
+- Idempotent
+- Safe for repeated execution
+- Pipeline-ready
 
 ---
 
 ## Scheduling & Reliability
 
-- **Schedule**: `@daily`  
-- **Retries**: 3  
-- **Retry Delay**: 5 minutes  
-- **Catchup**: Disabled  
+- **Schedule:** `@daily`
+- **Retries:** 3
+- **Retry Delay:** 5 minutes
+- **Catchup:** Disabled
 
-The pipeline is configured to retry automatically in case of transient failures (e.g. API issues), reflecting a realistic production setup.
+Designed to simulate a production-style retry and failure handling mechanism.
 
 ---
 
@@ -92,15 +144,19 @@ The pipeline is configured to retry automatically in case of transient failures 
 ```
 airflow-mini-etl/
 ├── dags/
-│   └── api_etl_dag.py
+│   ├── api_etl_dag.py
 ├── etl/
 │   ├── extract.py
 │   ├── transform.py
 │   ├── load.py
-│   └── __init__.py
-├── data/
-│   ├── raw_weather.json
-│   └── processed_weather.csv
+├── sql/
+│   ├── load_staging_weather.sql
+│   ├── load_staging_energy.sql
+│   └── build_mart_energy_daily.sql
+├── docs/
+│   ├── query_analysis.md
+│   ├── index_strategy.md
+│   └── data_modeling.md
 ├── docker-compose.yml
 └── README.md
 ```
@@ -109,13 +165,13 @@ airflow-mini-etl/
 
 ## How to Run
 
-1. Start the Airflow environment:
+### 1. Start Airflow
 
 ```
 docker compose up -d
 ```
 
-2. Open Airflow UI:
+### 2. Open Airflow UI
 
 ```
 http://localhost:8080
@@ -123,25 +179,28 @@ Username: admin
 Password: admin
 ```
 
-3. Trigger the DAG manually or wait for the scheduled run.
+### 3. Trigger the DAG
+
+Run the full weather + energy pipeline.
 
 ---
 
 ## What This Project Demonstrates
 
-- Building an ETL pipeline using Apache Airflow  
-- Running Airflow locally with Docker  
-- DAG authoring with PythonOperator  
-- Persisting intermediate artifacts (JSON & CSV)  
-- Loading structured data into PostgreSQL  
-- Using database schemas for logical data layer separation  
-- Executing SQL (DDL & DML) for data management  
+- Building an orchestrated ETL pipeline with Apache Airflow
+- Layered warehouse modeling (raw → staging → mart)
+- Dimensional modeling (fact & dimensions)
+- Idempotent SQL transformations
+- Index strategy validation with `EXPLAIN ANALYZE`
+- Dockerized local data engineering environment
+- Cost-based execution plan interpretation in PostgreSQL
 
 ---
 
-## Next Steps
+## Future Extensions
 
-- Automate PostgreSQL loading via an Airflow task  
-- Introduce a `staging` schema with typed transformations  
-- Add database-level data quality checks  
-- Refactor tasks using the TaskFlow API  
+- Add data quality checks as Airflow tasks
+- Introduce dbt for transformation management
+- Add alerting on validation failure
+- Add dashboard layer (e.g., Metabase)
+- Implement incremental loading logic
