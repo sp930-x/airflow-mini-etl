@@ -14,6 +14,7 @@
 
 ## 🏗 Architecture
 
+![Airflow DAG Success Flow](https://github.com/user-attachments/assets/6b2d58d8-a6f4-4aad-bab3-72baf7b6e0e5)
 
 1.  **Extract:** Hourly weather data from Open-Meteo API.
 2.  **Generate:** Synthetic Energy Load based on temperature & seasonality.
@@ -81,6 +82,3 @@ To simulate realistic analytical scenarios, energy demand is modeled with:
 * [ ] **dbt Integration:** Refactor transformation logic into dbt models.
 * [ ] **Alerting:** Slack/Email notifications on Quality Check failures.
 * [ ] **Visualization:** Connect Metabase or Grafana for real-time dashboards.
-
----
-**Contact:** [Your Name/Email] | [Your LinkedIn]
