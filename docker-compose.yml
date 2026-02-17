@@ -8,7 +8,7 @@
       POSTGRES_DB: airflow
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
-      - ./:/opt/project:ro
+
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 5s
@@ -29,6 +29,7 @@
       PYTHONPATH: /opt/airflow/project
     volumes:
       - ./:/opt/airflow/project
+
     working_dir: /opt/airflow/project
     ports:
       - "8080:8080"

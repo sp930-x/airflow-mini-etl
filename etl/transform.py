@@ -1,45 +1,54 @@
-# scripts/transform.py
 import json
 import csv
 from pathlib import Path
 
-def transform_raw_to_csv(raw_path: str, processed_path: str) -> str:
-    raw_file = Path(raw_path)
 
+def transform_raw_to_csv(
+    raw_path: str = "data/raw_weather.json",
+    processed_path: str = "data/processed_weather.csv",
+) -> str:
+    """
+    Transform multi-region Open-Meteo archive JSON into a flat CSV:
+      region,time,temperature_2m
+    """
+    raw_file = Path(raw_path)
     out_file = Path(processed_path)
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # convert raw json to python dict
-    payload = json.loads(raw_file.read_text(encoding="utf-8"))
+    data = json.loads(raw_file.read_text(encoding="utf-8"))
 
-    # validate the data
-    if (
-        "hourly" not in payload
-        or "time" not in payload["hourly"]
-        or "temperature_2m" not in payload["hourly"]
-    ):
-        raise KeyError(
-            "Unexpected API response schema: missing hourly/time/temperature_2m"
-        )
+    regions = data.get("regions")
+    if not isinstance(regions, list) or len(regions) == 0:
+        raise ValueError("Invalid raw schema: expected top-level key 'regions' as a non-empty list")
 
-    # extract data
-    hourly = payload["hourly"]
-    times = hourly["time"]
-    temps = hourly["temperature_2m"]
+    rows = []
+    for item in regions:
+        region = item.get("region")
+        payload = item.get("payload", {})
+        hourly = payload.get("hourly", {})
 
-    # validate the extracted data
-    if len(times) != len(temps):
-        raise ValueError(f"Length mismatch: time={len(times)} temp={len(temps)}")
-    
-    # save as csv
-    with out_file.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["time", "temperature_2m"])
+        times = hourly.get("time")
+        temps = hourly.get("temperature_2m")
+
+        if not region:
+            raise ValueError("Missing 'region' in one of regions[]")
+        if not isinstance(times, list) or not isinstance(temps, list):
+            raise ValueError(f"Missing hourly.time / hourly.temperature_2m for region={region}")
+        if len(times) != len(temps):
+            raise ValueError(f"Length mismatch for region={region}: time={len(times)} temp={len(temps)}")
+
         for t, temp in zip(times, temps):
-            writer.writerow([t, temp])
+            # Keep time as the ISO8601 string from Open-Meteo (UTC in the extract)
+            rows.append((region, t, temp))
+
+    with out_file.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["region", "time", "temperature_2m"])
+        w.writerows(rows)
 
     return str(out_file)
 
+
 if __name__ == "__main__":
-    result = transform_raw_to_csv("data/raw_weather.json", "data/processed_weather.csv")
-    print(result)
+    out = transform_raw_to_csv()
+    print(f"✅ Wrote: {out}")

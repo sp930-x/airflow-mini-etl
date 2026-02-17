@@ -1,14 +1,60 @@
 ## Execution Plan Inspection
 
-`EXPLAIN ANALYZE` was used to inspect how PostgreSQL executes time-range queries on the `raw.energy_load_hourly` table.
+`EXPLAIN (ANALYZE, BUFFERS)` was used to inspect how PostgreSQL executes a regional time-window join between:
 
-A range filter on the `ts` column demonstrated the following execution pattern:
+- `staging.energy_hourly_clean`
+- `staging.weather_hourly_clean`
 
-- `Bitmap Index Scan` on `idx_energy_ts`
-- Followed by a `Bitmap Heap Scan` on the base table
+The analyzed query filtered a one-week time range for a single region (`DE-NW`) and joined on `(ts, region)`.
 
-This confirms that PostgreSQL leveraged the timestamp index to efficiently locate matching rows before fetching the corresponding tuples from the table.
+### Observed Execution Plan
 
-For time-series workloads, range predicates are common, and proper indexing significantly reduces full table scans. Even with a small dataset (24 hourly rows), the execution plan illustrates how the optimizer selects index-based strategies for selective range filters.
+Key operators:
 
-This inspection step validates the indexing strategy and establishes a foundation for later performance comparisons (e.g., before/after index tuning).
+- **Bitmap Index Scan** on `energy_hourly_clean_pkey`
+- **Bitmap Heap Scan** on `staging.energy_hourly_clean`
+- **Seq Scan** on `staging.weather_hourly_clean`
+- **Hash Join**
+- Final **Sort** on `e.ts`
+
+### Interpretation
+
+1. **Efficient index usage on energy table**
+
+   PostgreSQL used a `Bitmap Index Scan` on the composite primary key `(ts, region)` to efficiently filter:
+   
+   - `region = 'DE-NW'`
+   - `ts BETWEEN '2026-02-01' AND '2026-02-08'`
+
+   Only 168 rows were retrieved for the requested week, demonstrating proper support for time-range + region filtering.
+
+2. **Sequential scan on weather table**
+
+   The planner chose a `Seq Scan` on `weather_hourly_clean` with:
+
+   - 720 matching rows for the selected region
+   - 1440 rows removed by filter
+
+   Given the relatively small table size (2,160 rows total), a sequential scan is cost-effective and expected.
+
+3. **Hash Join strategy**
+
+   PostgreSQL selected a `Hash Join`, hashing the filtered weather rows before joining on timestamp.  
+   This is appropriate given the moderate row counts and selective filtering.
+
+4. **Performance**
+
+   - Planning Time: ~0.4 ms  
+   - Execution Time: ~0.7–1.4 ms  
+
+   The query completes in under 2 ms, indicating efficient index design and scalable join behavior.
+
+### Conclusion
+
+The execution plan confirms that:
+
+- The composite primary key `(ts, region)` effectively supports selective time-range queries.
+- The join strategy is appropriate for the current dataset size.
+- The indexing strategy scales naturally for larger time-series workloads.
+
+This inspection validates both the schema design and the index strategy for regional time-series analytics.

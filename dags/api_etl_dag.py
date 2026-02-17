@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
-from etl.extract import extract_weather
+from etl.extract import extract_weather_archive
 from etl.transform import transform_raw_to_csv
 from etl.load import validate_processed_csv
 
@@ -28,7 +28,7 @@ with DAG(
 
     extract_task = PythonOperator(
         task_id="extract",
-        python_callable=extract_weather,
+        python_callable=extract_weather_archive,
         op_kwargs={"raw_path": RAW_PATH, "latitude": 51.4556, "longitude": 7.0116},
     )
 
