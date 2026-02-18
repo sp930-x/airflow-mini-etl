@@ -1,84 +1,144 @@
 # ⚡ Airflow Mini ETL Project: Weather-Driven Energy Demand Pipeline
 
-> **An end-to-end data engineering workflow simulating German regional energy demand patterns, featuring robust data quality gates and query performance tuning.**
+> Containerized data engineering pipeline modeling temperature-driven regional energy demand with reproducible SQL analytics and performance-aware schema design.
 
 ---
 
-## 🚀 Project High-Level Summary
-* **Objective:** Build an orchestrated ETL pipeline to analyze the correlation between regional temperature and energy load.
-* **Stack:** Apache Airflow, PostgreSQL, Docker, Python (psycopg2).
-* **Key Achievement:** Optimized join performance to **<2ms** via composite indexing and implemented **7 automated Data Quality gates**.
-* **Domain Focus:** Modeled on German energy market dynamics (e.g., cold-sensitivity in North Rhine-Westphalia).
+## 🚀 Overview
+
+**Goal**  
+Build a containerized, production-like ETL pipeline that transforms hourly weather data into daily, analytics-ready energy aggregates.
+
+**Stack**  
+Airflow · PostgreSQL · Docker · Python
+
+**Key Highlights**
+- Layered warehouse design (`raw → staging → mart`)
+- Idempotent UPSERT with composite PK `(ts, region)`
+- SQL-based data quality checks
+- Composite index `(region, ts)` validated via `EXPLAIN`
+- Reproducible business insights (`analysis_business.sql`)
 
 ---
 
-## 🏗 Architecture
+## 🐳 Architecture
+
+### Why Docker?
+
+- Reproducible environment
+- Service isolation (Airflow + PostgreSQL)
+- Production-like orchestration
+- One-command startup
+
+![Architecture](https://github.com/user-attachments/assets/a36995d4-869c-4f00-9113-2869acb35501)
+
+## 🏗 Orchestration
 
 ![Airflow DAG Success Flow](https://github.com/user-attachments/assets/6b2d58d8-a6f4-4aad-bab3-72baf7b6e0e5)
 
-1.  **Extract:** Hourly weather data from Open-Meteo API.
-2.  **Generate:** Synthetic Energy Load based on temperature & seasonality.
-3.  **Load:** Multi-stage loading into PostgreSQL (`raw` → `staging` → `mart`).
-4.  **Validate:** Integrated Data Quality (DQ) checks and Execution Plan analysis.
+Main DAG: `weather_energy_daily_mart`
+
+Pipeline steps:
+1. Extract weather data
+2. Generate synthetic energy load
+3. Load → raw
+4. Transform → staging
+5. Aggregate → mart
+6. Execute data quality checks
+
+All tasks are idempotent and dependency-aware.
 
 ---
 
-## 📊 Data Modeling & Layers
+## 📊 Data Model
 
-| Layer | Schema | Purpose | Key Engineering Features |
-| :--- | :--- | :--- | :--- |
-| **Raw** | `raw` | Source Traceability | Original granularity preserved for full reprocessing. |
-| **Staging** | `staging` | Standardization | **Idempotent** `UPSERT` logic, Composite PKs `(ts, region)`. |
-| **Mart** | `mart` | Analytics-Ready | **Fact/Dim** model, Aggregated at `Day × Region` grain. |
+| Layer   | Purpose |
+|----------|----------|
+| `raw`    | Source traceability |
+| `staging`| Standardized hourly data |
+| `mart`   | Daily aggregated fact table |
 
----
+Fact table: `mart.fact_energy_load_daily`
 
-## 🛡️ Data Quality & Reliability (Operational Layer)
-To ensure **Production-Grade Reliability**, the pipeline executes automated SQL-based checks:
-
-* **QC1-2 (Integrity):** Duplicate & PK-grain validation for Staging/Mart.
-* **QC3 (Completeness):** Strict NULL violation checks on critical columns.
-* **QC4 (Sanity):** Range validation (e.g., Germany temp range: -40°C to 45°C).
-* **QC5 (Observability):** **Outlier Detection** via hour-over-hour load spike analysis (`LAG` window functions).
-* **QC6 (Drift):** Row count drift check against expected counts (2,160 rows/cycle).
 
 ---
 
-## ⚡ Performance Tuning: Execution Plan Inspection
-I utilized `EXPLAIN (ANALYZE, BUFFERS)` to validate the indexing strategy for time-series workloads.
+## 🛡 Data Quality
 
-### **Query Optimization Outcome**
-* **Pattern:** Regional time-window join between Energy and Weather tables.
-* **Optimization:** Implemented a composite index on `(region, ts)`.
-* **Impact:** * Avoided expensive Sequential Scans on filtered datasets.
-    * Transitioned to efficient **Bitmap Index Scans**.
-    * **Execution Time:** Stable at **~0.7ms - 1.4ms**.
-
-> "This validates that the schema design scales naturally for larger time-series datasets."
+Automated SQL checks for:
+- Duplicate & grain validation
+- NULL enforcement
+- Temperature sanity range
+- Hour-over-hour anomaly detection
+- Row-count drift monitoring
 
 ---
 
-## 🧠 Synthetic Energy Modeling Logic
-To simulate realistic analytical scenarios, energy demand is modeled with:
-* **Baseline:** 1000 MW constant demand.
-* **Diurnal Cycle:** Sinusoidal pattern reflecting day/night usage.
-* **Weekend Adjustment:** -15% demand reduction for non-business days.
-* **Temperature Sensitivity:** Heat-pump/cooling load factors (`f(temp)`).
+## ⚡ Performance
+
+- Composite index on `(region, ts)`
+- No sequential scans on time-window joins
+- Execution time: ~0.7–1.4 ms
 
 ---
 
-## 🛠️ How to Run
-1.  **Clone & Start:**
-    ```bash
-    docker compose up -d
-    ```
-2.  **Access Airflow:**
-    * URL: `http://localhost:8080` (admin/admin)
-3.  **Trigger DAG:** `weather_energy_daily_mart`
+## 🧠 Business Insights
+
+Derived via `sql/analysis_business.sql`.
+
+- **Cold-shock events:** None observed (≤ -5°C hourly drop, n=0)
+- **Peak demand hour:** 06:00 (across 3/3 regions)
+- **Weekend effect:** -142.5 MW (~ -10.9%) vs weekdays
 
 ---
 
-## 📈 Potential Extensions
-* [ ] **dbt Integration:** Refactor transformation logic into dbt models.
-* [ ] **Alerting:** Slack/Email notifications on Quality Check failures.
-* [ ] **Visualization:** Connect Metabase or Grafana for real-time dashboards.
+## 📁 Structure
+
+```
+airflow-mini-etl/
+├── dags/
+├── etl/
+├── sql/
+├── docs/
+├── data/
+└── docker-compose.yml
+```
+
+---
+
+## 🚀 Quickstart
+
+Start services:
+
+        docker compose up -d
+
+Access Airflow:  
+http://localhost:8080  
+(admin / admin)
+
+Trigger DAG:  
+`weather_energy_daily_mart`
+
+Run analysis:
+
+        cat sql/analysis_business.sql | docker exec -i weather_postgres psql -U airflow -d airflow
+
+(Windows PowerShell)
+
+        Get-Content sql/analysis_business.sql | docker exec -i weather_postgres psql -U airflow -d airflow
+
+Reproducibility check:
+- staging.energy_hourly_clean rowcount: 2160
+- mart.fact_energy_load_daily rowcount: 90
+- analysis output is stable across re-runs (rounded outputs in sql/analysis_business.sql)
+
+
+---
+
+## 🎯 Focus
+
+This project emphasizes:
+- Data pipeline architecture
+- SQL-driven analytical reproducibility
+- Performance-aware schema design
+- Containerized deployment

@@ -1,60 +1,73 @@
-## Execution Plan Inspection
+### Why This Query Was Selected
 
-`EXPLAIN (ANALYZE, BUFFERS)` was used to inspect how PostgreSQL executes a regional time-window join between:
+The `dim_date` upsert is executed as part of the mart-building process and runs repeatedly in the ETL pipeline.
 
-- `staging.energy_hourly_clean`
-- `staging.weather_hourly_clean`
+Although the current dataset is small, this query contains:
 
-The analyzed query filtered a one-week time range for a single region (`DE-NW`) and joined on `(ts, region)`.
+- `UNION` (duplicate elimination)
+- `DISTINCT`
+- `ON CONFLICT` handling
+- Aggregation steps
 
-### Observed Execution Plan
+These operators can introduce unnecessary computational overhead as data volume grows.
 
-Key operators:
+For this reason, the query was selected to analyze duplicate-elimination cost and to validate whether structural simplifications (e.g., replacing `UNION` with `UNION ALL`) produce a cleaner execution plan.
 
-- **Bitmap Index Scan** on `energy_hourly_clean_pkey`
-- **Bitmap Heap Scan** on `staging.energy_hourly_clean`
-- **Seq Scan** on `staging.weather_hourly_clean`
-- **Hash Join**
-- Final **Sort** on `e.ts`
+The goal was not only to measure runtime differences, but to reason about scalability and operator-level behavior in PostgreSQL.
+
+## Insert Optimization: UNION vs UNION ALL in dim_date Upsert
+
+To evaluate duplicate-elimination cost in dimension upserts, the following query was analyzed:
+
+```sql
+INSERT INTO mart.dim_date (day)
+SELECT DISTINCT day
+FROM (
+  SELECT day FROM staging.weather_hourly_clean
+  UNION
+  SELECT day FROM staging.energy_hourly_clean
+) d
+ON CONFLICT (day) DO NOTHING;
+```
+
+### Before (Using UNION)
+
+- Execution Time: 1.464 ms
+- Plan Highlights:
+  - HashAggregate (duplicate elimination)
+  - Nested HashAggregate step (double aggregation)
+  - Append
+  - Index Only Scan on idx_stg_energy_day_region
+
+PostgreSQL performed duplicate elimination inside UNION, which introduced an additional aggregation step in the execution plan.
+
+---
+
+### After (Using UNION ALL + outer DISTINCT)
+
+```sql
+INSERT INTO mart.dim_date (day)
+SELECT DISTINCT day
+FROM (
+  SELECT day FROM staging.weather_hourly_clean
+  UNION ALL
+  SELECT day FROM staging.energy_hourly_clean
+) d
+ON CONFLICT (day) DO NOTHING;
+```
+
+- Execution Time: 1.661 ms
+- Plan Highlights:
+  - Single HashAggregate
+  - Append
+  - Index Only Scan on idx_stg_energy_day_region
+
+The plan becomes structurally simpler by avoiding duplicate elimination inside UNION.
+
+---
 
 ### Interpretation
 
-1. **Efficient index usage on energy table**
+Although execution times are nearly identical on the current small dataset (~4k rows), the execution plan using UNION ALL is structurally simpler.
 
-   PostgreSQL used a `Bitmap Index Scan` on the composite primary key `(ts, region)` to efficiently filter:
-   
-   - `region = 'DE-NW'`
-   - `ts BETWEEN '2026-02-01' AND '2026-02-08'`
-
-   Only 168 rows were retrieved for the requested week, demonstrating proper support for time-range + region filtering.
-
-2. **Sequential scan on weather table**
-
-   The planner chose a `Seq Scan` on `weather_hourly_clean` with:
-
-   - 720 matching rows for the selected region
-   - 1440 rows removed by filter
-
-   Given the relatively small table size (2,160 rows total), a sequential scan is cost-effective and expected.
-
-3. **Hash Join strategy**
-
-   PostgreSQL selected a `Hash Join`, hashing the filtered weather rows before joining on timestamp.  
-   This is appropriate given the moderate row counts and selective filtering.
-
-4. **Performance**
-
-   - Planning Time: ~0.4 ms  
-   - Execution Time: ~0.7–1.4 ms  
-
-   The query completes in under 2 ms, indicating efficient index design and scalable join behavior.
-
-### Conclusion
-
-The execution plan confirms that:
-
-- The composite primary key `(ts, region)` effectively supports selective time-range queries.
-- The join strategy is appropriate for the current dataset size.
-- The indexing strategy scales naturally for larger time-series workloads.
-
-This inspection validates both the schema design and the index strategy for regional time-series analytics.
+UNION ALL avoids an unnecessary internal duplicate-elimination step and therefore scales better for larger datasets.

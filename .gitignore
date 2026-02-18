@@ -6,3 +6,7 @@ __pycache__/
 
 data/raw_weather.json
 data/processed_weather.csv
+
+backup_rm.md
+
+Architecture.png
