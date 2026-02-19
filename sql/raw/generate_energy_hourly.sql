@@ -1,8 +1,15 @@
 -- ============================================================
--- File: sql/generate_energy_hourly.sql
--- Purpose: Generate synthetic hourly energy load
--- Grain: (ts, region)
+-- Project: Airflow + Postgres mini ETL (Energy load x Weather)
+-- File: sql/raw/generate_energy_hourly.sql
+-- Layer: Raw
+-- Purpose:
+--   Generate synthetic hourly energy load data and load into raw layer.
+-- Output:
+--   raw.energy_load_hourly
+-- Idempotency:
+--   Safe to re-run (define strategy used: TRUNCATE+INSERT or INSERT-only).
 -- ============================================================
+
 
 -- Make randomness deterministic
 SELECT setseed(0.42);

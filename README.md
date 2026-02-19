@@ -13,96 +13,107 @@ Build a containerized, production-like ETL pipeline that transforms hourly weath
 Airflow · PostgreSQL · Docker · Python
 
 **Key Highlights**
-- Layered warehouse design (`raw → staging → mart`)
-- Idempotent UPSERT with composite PK `(ts, region)`
+
+- Layered warehouse design (raw → staging → mart)
+- Idempotent UPSERT  
+  - Staging grain: (ts, region)  
+  - Mart grain: (day, region)
+- Star schema (dim_date, dim_region, fact_energy_load_daily)
 - SQL-based data quality checks
-- Composite index `(region, ts)` validated via `EXPLAIN`
-- Reproducible business insights (`analysis_business.sql`)
+- Composite index (region, ts) validated via EXPLAIN
+- Reproducible business insights (analysis_business.sql)
 
 ---
 
 ## 🐳 Architecture
 
-### Why Docker?
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/a36995d4-869c-4f00-9113-2869acb35501" width="75%">
+</p>
 
-- Reproducible environment
-- Service isolation (Airflow + PostgreSQL)
-- Production-like orchestration
-- One-command startup
-
-![Architecture](https://github.com/user-attachments/assets/a36995d4-869c-4f00-9113-2869acb35501)
+---
 
 ## 🏗 Orchestration
 
-![Airflow DAG Success Flow](https://github.com/user-attachments/assets/6b2d58d8-a6f4-4aad-bab3-72baf7b6e0e5)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/6b2d58d8-a6f4-4aad-bab3-72baf7b6e0e5" width="75%">
+</p>
 
-Main DAG: `weather_energy_daily_mart`
+Main DAG: weather_energy_daily_mart
 
 Pipeline steps:
-1. Extract weather data
-2. Generate synthetic energy load
-3. Load → raw
-4. Transform → staging
-5. Aggregate → mart
-6. Execute data quality checks
+1. Extract weather data  
+2. Generate synthetic energy load  
+3. Load → raw  
+4. Transform → staging  
+5. Aggregate → mart  
+6. Execute data quality checks  
 
-All tasks are idempotent and dependency-aware.
+All tasks are dependency-aware and idempotent via UPSERT (no hard deletes).
 
 ---
 
 ## 📊 Data Model
 
-| Layer   | Purpose |
-|----------|----------|
-| `raw`    | Source traceability |
-| `staging`| Standardized hourly data |
-| `mart`   | Daily aggregated fact table |
+| Layer     | Purpose |
+|-----------|----------|
+| raw       | Source traceability |
+| staging   | Standardized hourly data |
+| mart      | Daily star-schema model |
 
-Fact table: `mart.fact_energy_load_daily`
-
+Star Schema:
+- mart.dim_date
+- mart.dim_region
+- mart.fact_energy_load_daily  
+  (grain: day × region)
 
 ---
 
 ## 🛡 Data Quality
 
 Automated SQL checks for:
+
 - Duplicate & grain validation
 - NULL enforcement
 - Temperature sanity range
 - Hour-over-hour anomaly detection
 - Row-count drift monitoring
+- Mart grain validation (day, region)
 
 ---
 
 ## ⚡ Performance
 
-- Composite index on `(region, ts)`
+- Composite index on (region, ts)
 - No sequential scans on time-window joins
-- Execution time: ~0.7–1.4 ms
+- Execution time: ~0.7–1.4 ms (validated via EXPLAIN)
 
 ---
 
 ## 🧠 Business Insights
 
-Derived via `sql/analysis_business.sql`.
+Derived via sql/analysis/analysis_business.sql.
 
-- **Cold-shock events:** None observed (≤ -5°C hourly drop, n=0)
-- **Peak demand hour:** 06:00 (across 3/3 regions)
-- **Weekend effect:** -142.5 MW (~ -10.9%) vs weekdays
+- Cold-shock events: None observed (≤ -5°C hourly drop, n=0)
+- Peak demand hour: 06:00 (across 3/3 regions)
+- Weekend effect: -142.5 MW (~ -10.9%) vs weekdays
 
 ---
 
 ## 📁 Structure
 
-```
-airflow-mini-etl/
-├── dags/
-├── etl/
-├── sql/
-├── docs/
-├── data/
-└── docker-compose.yml
-```
+    airflow-mini-etl/
+    ├── dags/
+    ├── etl/
+    ├── sql/
+    │   ├── raw/
+    │   ├── staging/
+    │   ├── mart/
+    │   ├── tests/
+    │   └── analysis/
+    ├── docs/
+    ├── data/
+    └── docker-compose.yml
 
 ---
 
@@ -110,35 +121,42 @@ airflow-mini-etl/
 
 Start services:
 
-        docker compose up -d
+    docker compose up -d
 
-Access Airflow:  
+Access Airflow:
 http://localhost:8080  
 (admin / admin)
 
-Trigger DAG:  
-`weather_energy_daily_mart`
+Trigger DAG:
+weather_energy_daily_mart
 
-Run analysis:
+Run analysis (macOS / Linux):
 
-        cat sql/analysis_business.sql | docker exec -i weather_postgres psql -U airflow -d airflow
+    cat sql/analysis/analysis_business.sql | docker exec -i weather_postgres psql -U airflow -d airflow
 
-(Windows PowerShell)
+Windows PowerShell:
 
-        Get-Content sql/analysis_business.sql | docker exec -i weather_postgres psql -U airflow -d airflow
+    Get-Content sql/analysis/analysis_business.sql | docker exec -i weather_postgres psql -U airflow -d airflow
 
-Reproducibility check:
-- staging.energy_hourly_clean rowcount: 2160
-- mart.fact_energy_load_daily rowcount: 90
-- analysis output is stable across re-runs (rounded outputs in sql/analysis_business.sql)
+---
 
+## 🔁 Reproducibility Check
+
+| Item | Expected |
+|------|----------|
+| Row count (staging.energy_hourly_clean) | 2160 |
+| Row count (mart.fact_energy_load_daily) | 90 |
+| Mart idempotency | Row count unchanged after re-run |
+| Analysis stability | Outputs stable across re-runs |
 
 ---
 
 ## 🎯 Focus
 
 This project emphasizes:
+
 - Data pipeline architecture
 - SQL-driven analytical reproducibility
+- Star-schema modeling
 - Performance-aware schema design
 - Containerized deployment

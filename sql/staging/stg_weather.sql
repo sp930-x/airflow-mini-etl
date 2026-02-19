@@ -1,8 +1,18 @@
 -- ============================================================
--- File: sql/load_staging_weather.sql
--- Purpose: Load & clean weather data from raw to staging (multi-region)
--- Grain: (ts, region)
+-- Project: Airflow + Postgres mini ETL (Energy load x Weather)
+-- File: sql/staging/stg_weather.sql
+-- Layer: Staging
+-- Purpose:
+--   Clean and standardize raw weather data for analytics and joins.
+-- Input:
+--   raw.weather_hourly
+-- Output:
+--   staging.weather_hourly_clean
+-- Idempotency:
+--   Rebuildable (TRUNCATE + INSERT or CREATE OR REPLACE).
 -- ============================================================
+
+
 
 -- 1) Ensure schema exists
 CREATE SCHEMA IF NOT EXISTS staging;

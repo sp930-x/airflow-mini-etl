@@ -1,8 +1,21 @@
 -- ============================================================
--- File: sql/quality_checks.sql
--- Purpose: Data quality checks for operational confidence
--- Scope: raw/staging/mart
+-- Project: Airflow + Postgres mini ETL (Energy load x Weather)
+-- File: sql/tests/test_quality_checks.sql
+-- Layer: Tests
+-- Purpose:
+--   Data quality checks (nulls, duplicates, value ranges, row counts).
+-- Targets:
+--   raw.weather_hourly
+--   raw.energy_load_hourly
+--   staging.weather_hourly_clean
+--   staging.energy_hourly_clean
+--   mart.dim_date
+--   mart.dim_region
+--   mart.fact_energy_load_daily
+-- Notes:
+--   Designed to fail loudly (returns violating rows / raises via wrapper).
 -- ============================================================
+
 
 -- QC1) Duplicate / PK-grain check (staging energy)
 SELECT
@@ -46,7 +59,8 @@ WITH deltas AS (
 )
 SELECT *
 FROM deltas
-WHERE ABS(delta_mw) >= 400  -- threshold: tune if needed
+WHERE delta_mw IS NOT NULL
+  AND ABS(delta_mw) >= 400  -- threshold: tune if needed
 ORDER BY ABS(delta_mw) DESC
 LIMIT 20;
 

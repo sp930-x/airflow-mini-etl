@@ -1,11 +1,19 @@
 -- ============================================================
 -- Project: Airflow + Postgres mini ETL (Energy load x Weather)
--- File: sql/queries.sql
--- Purpose: Showcase "analytical SQL" (joins + window functions)
+-- File: sql/analysis/examples_queries.sql
+-- Layer: Analysis (Exploratory / showcase queries)
+-- Purpose:
+--   Demonstrate analytical SQL patterns (joins + window functions)
+-- Sources:
+--   raw.weather_hourly
+--   raw.energy_load_hourly
+-- Inputs (used in this file):
+--   staging.weather_hourly_clean (ts, region)
+--   staging.energy_hourly_clean  (ts, region)
 -- Notes:
---   - Weather is regional in staging.weather_hourly_clean (ts, region)
---   - Energy is regional in staging.energy_hourly_clean (ts, region)
+--   Not executed by the Airflow pipeline (for exploration only).
 -- ============================================================
+
 
 
 -- Q1) Base join: hourly energy load with hourly weather by (timestamp, region)

@@ -14,8 +14,8 @@ DEFAULT_ARGS = {
 SQL_DIR = Path("/opt/airflow/project/sql")
 
 
-def read_sql(filename: str) -> str:
-    return (SQL_DIR / filename).read_text(encoding="utf-8")
+def read_sql(*relative_parts: str) -> str:
+    return (SQL_DIR.joinpath(*relative_parts)).read_text(encoding="utf-8")
 
 
 with DAG(
@@ -28,50 +28,49 @@ with DAG(
 ) as dag:
 
     # 1) staging weather (raw -> staging)
-    load_staging_weather = PostgresOperator(
-        task_id="load_staging_weather",
+    stg_weather = PostgresOperator(
+        task_id="stg_weather",
         postgres_conn_id="postgres_default",
-        sql=read_sql("load_staging_weather.sql"),
+        sql=read_sql("staging", "stg_weather.sql"),
     )
 
-    # 2) generate synthetic energy (based on raw weather)
-    generate_energy = PostgresOperator(
-        task_id="generate_energy_hourly",
+    # 2) generate synthetic energy (raw layer)
+    gen_energy_hourly = PostgresOperator(
+        task_id="gen_energy_hourly",
         postgres_conn_id="postgres_default",
-        sql=read_sql("generate_energy_hourly.sql"),
+        sql=read_sql("raw", "generate_energy_hourly.sql"),
     )
 
     # 3) staging energy (raw -> staging)
-    load_staging_energy = PostgresOperator(
-        task_id="load_staging_energy",
+    stg_energy = PostgresOperator(
+        task_id="stg_energy",
         postgres_conn_id="postgres_default",
-        sql=read_sql("load_staging_energy.sql"),
+        sql=read_sql("staging", "stg_energy.sql"),
     )
 
-    # 4) build mart (daily)
-    build_mart = PostgresOperator(
-        task_id="build_mart_daily",
+    # 4) build mart (dims + fact)
+    build_fact_energy_load_daily = PostgresOperator(
+        task_id="build_fact_energy_load_daily",
         postgres_conn_id="postgres_default",
-        sql=read_sql("build_mart_energy_daily.sql"),
+        sql=read_sql("mart", "fact_energy_load_daily.sql"),
     )
 
-    # 5) validation report (prints metrics)
+    # 5) validation report
     validate_report = PostgresOperator(
         task_id="validate_report",
         postgres_conn_id="postgres_default",
-        sql=read_sql("validation.sql"),
+        sql=read_sql("tests", "test_validation.sql"),
     )
 
-    # 6) quality checks report (prints QC outputs / top outliers)
+    # 6) quality checks report
     quality_checks_report = PostgresOperator(
         task_id="quality_checks_report",
         postgres_conn_id="postgres_default",
-        sql=read_sql("quality_checks.sql"),
+        sql=read_sql("tests", "test_quality_checks.sql"),
     )
 
-    # 7) FAIL-FAST checks (these should fail the DAG if violated)
+    # 7) FAIL-FAST checks
 
-    # Weather temperature range must be reasonable
     check_weather_range = SQLCheckOperator(
         task_id="check_weather_range",
         conn_id="postgres_default",
@@ -82,7 +81,6 @@ with DAG(
         """,
     )
 
-    # No duplicates vs PK grain in staging energy
     check_energy_no_duplicates = SQLCheckOperator(
         task_id="check_energy_no_duplicates",
         conn_id="postgres_default",
@@ -92,7 +90,6 @@ with DAG(
         """,
     )
 
-    # Optional strictness: row-count drift must match expected (portfolio dataset)
     check_rowcount_expected = SQLCheckOperator(
         task_id="check_rowcount_expected",
         conn_id="postgres_default",
@@ -102,9 +99,11 @@ with DAG(
         """,
     )
 
-    # Pipeline
-    load_staging_weather >> generate_energy >> load_staging_energy >> build_mart
-
-    # Reports first (so you always get metrics printed), then fail-fast checks
-    build_mart >> validate_report >> quality_checks_report
-    quality_checks_report >> [check_weather_range, check_energy_no_duplicates, check_rowcount_expected]
+    # Pipeline flow
+    stg_weather >> gen_energy_hourly >> stg_energy >> build_fact_energy_load_daily
+    build_fact_energy_load_daily >> validate_report >> quality_checks_report
+    quality_checks_report >> [
+        check_weather_range,
+        check_energy_no_duplicates,
+        check_rowcount_expected,
+    ]

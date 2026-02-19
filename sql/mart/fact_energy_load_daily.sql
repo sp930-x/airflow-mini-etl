@@ -1,4 +1,26 @@
--- Ensure schemas/tables exist (safe to run repeatedly)
+-- ============================================================
+-- Project: Airflow + Postgres mini ETL (Energy load x Weather)
+-- File: sql/mart/fact_energy_load_daily.sql
+-- Layer: Mart
+-- Grain:
+--   day × region
+-- Purpose:
+--   Build analytics-ready daily energy load metrics (extensible to weather features).
+-- Inputs:
+--   staging.energy_hourly_clean
+--   staging.weather_hourly_clean (for date/region dimension coverage)
+-- Outputs:
+--   mart.dim_date
+--   mart.dim_region
+--   mart.fact_energy_load_daily
+-- Idempotency:
+--   Idempotent via UPSERT:
+--   - dimensions: INSERT ... ON CONFLICT DO NOTHING
+--   - fact: INSERT ... ON CONFLICT DO UPDATE (day, region)
+--   Note: does not delete rows if upstream (staging) removes a day/region.
+-- ============================================================
+
+
 CREATE SCHEMA IF NOT EXISTS mart;
 
 CREATE TABLE IF NOT EXISTS mart.dim_date (
@@ -34,8 +56,13 @@ ON CONFLICT (day) DO NOTHING;
 
 INSERT INTO mart.dim_region (region)
 SELECT DISTINCT region
-FROM staging.energy_hourly_clean
+FROM (
+  SELECT region FROM staging.energy_hourly_clean
+  UNION
+  SELECT region FROM staging.weather_hourly_clean
+) r
 ON CONFLICT (region) DO NOTHING;
+
 
 -- Upsert fact
 INSERT INTO mart.fact_energy_load_daily (
