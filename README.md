@@ -94,7 +94,7 @@ The pipeline can be safely executed multiple times without data corruption.
 ## 🔁 Airflow DAG Structure
 
 <p align="center">
-  <img src="docs/images/dag.png" width="1000"/>
+  <img src="docs/images/DAG.png" width="1000"/>
 </p>
 
 This DAG enforces layered execution:
