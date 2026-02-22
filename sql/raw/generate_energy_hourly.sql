@@ -7,15 +7,33 @@
 -- Output:
 --   raw.energy_load_hourly
 -- Idempotency:
---   Safe to re-run (define strategy used: TRUNCATE+INSERT or INSERT-only).
+--   Safe to re-run (TRUNCATE + INSERT).
 -- ============================================================
 
+-- 0) Ensure schema/table exists
+CREATE SCHEMA IF NOT EXISTS raw;
 
--- Make randomness deterministic
+CREATE TABLE IF NOT EXISTS raw.energy_load_hourly (
+  ts timestamptz NOT NULL,
+  region text NOT NULL,
+  load_mw double precision NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (ts, region)
+);
+
+CREATE INDEX IF NOT EXISTS idx_raw_energy_ts
+  ON raw.energy_load_hourly (ts);
+
+CREATE INDEX IF NOT EXISTS idx_raw_energy_region_ts
+  ON raw.energy_load_hourly (region, ts);
+
+-- 1) Make randomness deterministic
 SELECT setseed(0.42);
 
+-- 2) Rebuild
 TRUNCATE raw.energy_load_hourly;
 
+-- 3) Generate synthetic load using weather as driver
 INSERT INTO raw.energy_load_hourly (ts, region, load_mw)
 SELECT
   w.time AS ts,

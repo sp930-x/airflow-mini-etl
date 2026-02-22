@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: mart_energy_weather_daily
+
+    columns:
+      - name: day_utc
+        tests:
+          - not_null
+
+      - name: region
+        tests:
+          - not_null
+
+      - name: avg_load_mw
+        tests:
+          - not_null
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - day_utc
+            - region
+
+      - dbt_utils.expression_is_true:
+          expression: "avg_load_mw > 0"

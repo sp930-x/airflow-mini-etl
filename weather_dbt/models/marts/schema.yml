@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: mart_weather_daily
+    description: "Daily aggregates derived from analytics.weather_hourly."
+    columns:
+      - name: day_utc
+        tests:
+          - not_null
+          - unique

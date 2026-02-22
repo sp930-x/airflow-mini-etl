@@ -1,162 +1,244 @@
-# ⚡ Airflow Mini ETL Project: Weather-Driven Energy Demand Pipeline
+# ⚡ Airflow + dbt Mini Data Platform  
+Weather-Driven Energy Demand Modeling
 
-> Containerized data engineering pipeline modeling temperature-driven regional energy demand with reproducible SQL analytics and performance-aware schema design.
+> Production-style containerized data pipeline orchestrating raw ingestion, transformation, validation, and analytics modeling using Airflow + dbt.
+
+---
+
+## 💎 Portfolio Impact (TL;DR)
+
+- Designed a containerized, end-to-end data platform using Airflow + dbt
+- Implemented layered warehouse architecture (raw → staging → mart) with idempotent rebuilds
+- Built multi-layer data validation (infrastructure-level SQL checks + semantic dbt tests)
+- Ensured reproducibility, deterministic outputs, and performance-aware schema design
 
 ---
 
 ## 🚀 Overview
 
 **Goal**  
-Build a containerized, production-like ETL pipeline that transforms hourly weather data into daily, analytics-ready energy aggregates.
+Design a reproducible, production-inspired data platform that transforms hourly weather data into validated, analytics-ready regional energy aggregates.
 
-**Stack**  
-Airflow · PostgreSQL · Docker · Python
-
-**Key Highlights**
-
-- Layered warehouse design (raw → staging → mart)
-- Idempotent UPSERT  
-  - Staging grain: (ts, region)  
-  - Mart grain: (day, region)
-- Star schema (dim_date, dim_region, fact_energy_load_daily)
-- SQL-based data quality checks
-- Composite index (region, ts) validated via EXPLAIN
-- Reproducible business insights (analysis_business.sql)
+This project simulates a real-world data engineering setup where orchestration, transformation, storage, and validation are clearly separated.
 
 ---
 
-## 🐳 Architecture
+## 🧱 Architecture Philosophy
+
+This project intentionally separates concerns:
+
+| Layer | Responsibility |
+|-------|---------------|
+| Airflow | Orchestration & task dependency management |
+| Python | Raw ingestion & synthetic data generation |
+| PostgreSQL | Data warehouse storage |
+| dbt | Transformation logic & data tests |
+
+Airflow controls execution order and system reliability.  
+dbt controls transformation logic and semantic validation.
+
+This mirrors modern production architectures where orchestration and transformation layers are decoupled.
+
+---
+## 🏗 System Architecture
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/a36995d4-869c-4f00-9113-2869acb35501" width="75%">
+  <img src="docs/images/Architecture.png" width="750"/>
 </p>
 
----
+## 🧠 Why This Architecture?
 
-## 🏗 Orchestration
+This project is designed to reflect how production data platforms are structured:
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/6b2d58d8-a6f4-4aad-bab3-72baf7b6e0e5" width="75%">
-</p>
+### 1️⃣ Clear Separation of Responsibilities
+- Airflow focuses on workflow orchestration
+- dbt focuses on data modeling and validation
+- PostgreSQL handles storage and indexing
+- Python handles ingestion logic
 
-Main DAG: weather_energy_daily_mart
-
-Pipeline steps:
-1. Extract weather data  
-2. Generate synthetic energy load  
-3. Load → raw  
-4. Transform → staging  
-5. Aggregate → mart  
-6. Execute data quality checks  
-
-All tasks are dependency-aware and idempotent via UPSERT (no hard deletes).
+Each component has a single responsibility.
 
 ---
 
-## 📊 Data Model
+### 2️⃣ Two-Layer Data Validation Strategy
 
-| Layer     | Purpose |
-|-----------|----------|
-| raw       | Source traceability |
-| staging   | Standardized hourly data |
-| mart      | Daily star-schema model |
-
-Star Schema:
-- mart.dim_date
-- mart.dim_region
-- mart.fact_energy_load_daily  
-  (grain: day × region)
-
----
-
-## 🛡 Data Quality
-
-Automated SQL checks for:
-
-- Duplicate & grain validation
-- NULL enforcement
-- Temperature sanity range
-- Hour-over-hour anomaly detection
+Infrastructure-Level Validation (Airflow SQLCheckOperator):
+- Temperature sanity range checks
+- Duplicate detection
 - Row-count drift monitoring
-- Mart grain validation (day, region)
+- Fail-fast behavior before transformation
+
+Semantic-Level Validation (dbt tests):
+- not_null
+- unique
+- unique_combination_of_columns
+- dbt_utils expression checks
+
+This mimics production systems where:
+- Infrastructure ensures pipeline health
+- dbt ensures analytical correctness
 
 ---
 
-## ⚡ Performance
+### 3️⃣ Idempotency & Determinism
 
-- Composite index on (region, ts)
+- No hard deletes
+- Re-runnable DAG without row duplication
+- Stable analytical outputs across re-runs
+- Deterministic dependency installation via `dbt deps`
+
+The pipeline can be safely executed multiple times without data corruption.
+
+---
+
+## 🔁 Airflow DAG Structure
+
+<p align="center">
+  <img src="docs/images/dag.png" width="1000"/>
+</p>
+
+This DAG enforces layered execution:
+- Ingestion
+- Infrastructure validation
+- dbt transformation
+- dbt semantic testing
+
+---
+
+## 🐳 End-to-End Flow
+
+1. Validate processed weather CSV  
+2. Load weather → `raw.weather_hourly`  
+3. Generate synthetic energy → `raw.energy_load_hourly`  
+4. Infrastructure sanity checks (fail-fast)  
+5. dbt deps  
+6. dbt run (staging + marts)  
+7. dbt test (schema & business rule validation)
+
+All steps are containerized and dependency-aware.
+
+---
+
+## 🏗 Warehouse Design
+
+### Raw Layer
+- Source traceability
+- No transformations
+
+### Staging Layer (dbt)
+- Standardized column naming
+- Type normalization
+- View-based transformations
+
+### Mart Layer (dbt)
+
+Star-schema design:
+
+- `dbt_staging.stg_weather_hourly`
+- `dbt_staging.stg_energy_hourly`
+- `dbt_mart.mart_weather_daily`
+- `dbt_mart.mart_energy_weather_daily`
+
+Grain:
+
+- Weather: day  
+- Energy: day × region  
+
+---
+
+## 🛡 Data Quality Strategy
+
+Two-layer validation approach:
+
+### Infrastructure Checks (Airflow)
+- Temperature bounds validation
+- Duplicate detection
+- Row-count validation
+- Fail-fast behavior
+
+### Semantic Tests (dbt)
+- not_null
+- unique
+- composite key validation
+- expression-based business rules
+
+---
+
+## ⚡ Performance Engineering
+
+- Composite index on `(region, ts)`
 - No sequential scans on time-window joins
-- Execution time: ~0.7–1.4 ms (validated via EXPLAIN)
+- Idempotent rebuilds
+- Verified via `EXPLAIN`
+
+Execution benchmark:
+~0.7–1.4 ms for time-window join queries
+
+---
+
+## 📦 Tech Stack
+
+- Airflow 2.9  
+- dbt 1.8  
+- PostgreSQL 15  
+- Docker Compose  
+- Python 3.12  
 
 ---
 
 ## 🧠 Business Insights
 
-Derived via sql/analysis/analysis_business.sql.
+Derived from mart layer:
 
-- Cold-shock events: None observed (≤ -5°C hourly drop, n=0)
-- Peak demand hour: 06:00 (across 3/3 regions)
-- Weekend effect: -142.5 MW (~ -10.9%) vs weekdays
-
----
-
-## 📁 Structure
-
-    airflow-mini-etl/
-    ├── dags/
-    ├── etl/
-    ├── sql/
-    │   ├── raw/
-    │   ├── staging/
-    │   ├── mart/
-    │   ├── tests/
-    │   └── analysis/
-    ├── docs/
-    ├── data/
-    └── docker-compose.yml
+- Peak demand hour: 06:00  
+- Weekend demand effect: -10.9% vs weekday  
+- No cold-shock events observed  
 
 ---
 
-## 🚀 Quickstart
+## 📁 Project Structure
 
-Start services:
-
-    docker compose up -d
-
-Access Airflow:
-http://localhost:8080  
-(admin / admin)
-
-Trigger DAG:
-weather_energy_daily_mart
-
-Run analysis (macOS / Linux):
-
-    cat sql/analysis/analysis_business.sql | docker exec -i weather_postgres psql -U airflow -d airflow
-
-Windows PowerShell:
-
-    Get-Content sql/analysis/analysis_business.sql | docker exec -i weather_postgres psql -U airflow -d airflow
-
----
-
-## 🔁 Reproducibility Check
-
-| Item | Expected |
-|------|----------|
-| Row count (staging.energy_hourly_clean) | 2160 |
-| Row count (mart.fact_energy_load_daily) | 90 |
-| Mart idempotency | Row count unchanged after re-run |
-| Analysis stability | Outputs stable across re-runs |
+```
+airflow-mini-etl/
+├── dags/
+├── etl/
+├── weather_dbt/
+│   ├── models/
+│   ├── macros/
+│   ├── seeds/
+│   ├── packages.yml
+│   └── dbt_project.yml
+├── sql/
+│   ├── raw/
+│   ├── staging/
+│   ├── mart/
+│   ├── tests/
+│   └── analysis/
+├── data/
+└── docker-compose.yml
+```
 
 ---
 
-## 🎯 Focus
+## 🔁 Reproducibility Guarantees
+
+Re-running the DAG:
+
+- Does not change row counts
+- Does not duplicate records
+- Produces stable analytical outputs
+- Ensures deterministic package resolution via dbt
+
+---
+
+## 🎯 Engineering Focus
 
 This project emphasizes:
 
-- Data pipeline architecture
-- SQL-driven analytical reproducibility
+- Workflow orchestration best practices
+- Separation of orchestration vs transformation
+- Reproducible SQL analytics
 - Star-schema modeling
-- Performance-aware schema design
+- Multi-layer data validation
 - Containerized deployment
+- Production-style pipeline design

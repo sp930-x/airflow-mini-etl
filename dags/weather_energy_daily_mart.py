@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+import os
 
 from airflow import DAG
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.common.sql.operators.sql import SQLCheckOperator
+from airflow.providers.docker.operators.docker import DockerOperator
+from docker.types import Mount
 
 DEFAULT_ARGS = {
     "owner": "sinyoung",
@@ -24,7 +27,7 @@ with DAG(
     start_date=datetime(2026, 2, 1),
     schedule="@daily",
     catchup=False,
-    tags=["warehouse", "postgres", "dq"],
+    tags=["warehouse", "postgres", "dq", "dbt"],
 ) as dag:
 
     # 1) staging weather (raw -> staging)
@@ -70,7 +73,6 @@ with DAG(
     )
 
     # 7) FAIL-FAST checks
-
     check_weather_range = SQLCheckOperator(
         task_id="check_weather_range",
         conn_id="postgres_default",
@@ -99,11 +101,80 @@ with DAG(
         """,
     )
 
+    # 8) dbt (deps -> run -> test)
+    DBT_IMAGE = "ghcr.io/dbt-labs/dbt-postgres:1.8.2"
+    DBT_WORKDIR = "/opt/project"
+    DBT_PROJECT_DIR = "/opt/project/weather_dbt"
+    DBT_PROFILES_DIR = "/opt/project/.dbt"
+    DOCKER_NETWORK = "airflow-mini-etl_default"
+
+    host_project_dir = os.environ.get("HOST_PROJECT_DIR")
+    if not host_project_dir:
+        raise RuntimeError(
+            "HOST_PROJECT_DIR env var is missing. Set it in .env and pass it to airflow-scheduler/webserver."
+        )
+
+    project_mount = Mount(
+        source=host_project_dir,     # Windows host path (e.g. C:/Users/...)
+        target="/opt/project",       # inside dbt container
+        type="bind",
+    )
+
+    dbt_deps = DockerOperator(
+        task_id="dbt_deps",
+        image=DBT_IMAGE,
+        api_version="auto",
+        docker_url="unix://var/run/docker.sock",
+        network_mode=DOCKER_NETWORK,
+        auto_remove=True,
+        mounts=[project_mount],
+        working_dir=DBT_WORKDIR,
+        environment={"DBT_PROFILES_DIR": DBT_PROFILES_DIR},
+        entrypoint="",
+        command=f"bash -lc 'dbt deps --project-dir {DBT_PROJECT_DIR}'",
+        mount_tmp_dir=False,
+    )
+
+    dbt_run = DockerOperator(
+        task_id="dbt_run",
+        image=DBT_IMAGE,
+        api_version="auto",
+        docker_url="unix://var/run/docker.sock",
+        network_mode=DOCKER_NETWORK,
+        auto_remove=True,
+        mounts=[project_mount],
+        working_dir=DBT_WORKDIR,
+        environment={"DBT_PROFILES_DIR": DBT_PROFILES_DIR},
+        entrypoint="",
+        command=f"bash -lc 'dbt run --project-dir {DBT_PROJECT_DIR}'",
+        mount_tmp_dir=False,
+    )
+
+    dbt_test = DockerOperator(
+        task_id="dbt_test",
+        image=DBT_IMAGE,
+        api_version="auto",
+        docker_url="unix://var/run/docker.sock",
+        network_mode=DOCKER_NETWORK,
+        auto_remove=True,
+        mounts=[project_mount],
+        working_dir=DBT_WORKDIR,
+        environment={"DBT_PROFILES_DIR": DBT_PROFILES_DIR},
+        entrypoint="",
+        command=f"bash -lc 'dbt test --project-dir {DBT_PROJECT_DIR}'",
+        mount_tmp_dir=False,
+    )
+
+    # =========================
     # Pipeline flow
+    # =========================
     stg_weather >> gen_energy_hourly >> stg_energy >> build_fact_energy_load_daily
     build_fact_energy_load_daily >> validate_report >> quality_checks_report
+
     quality_checks_report >> [
         check_weather_range,
         check_energy_no_duplicates,
         check_rowcount_expected,
     ]
+
+    [check_weather_range, check_energy_no_duplicates, check_rowcount_expected] >> dbt_deps >> dbt_run >> dbt_test
